@@ -1,101 +1,350 @@
-import Image from "next/image";
+'use client';
+import { SearchForm } from '@/components/InputForm';
+import { Button } from '@/components/ui/button';
+import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { Label } from '@/components/ui/label';
+import { useAuth } from '@/context/context';
+import timeAgo from '@/utilities/timeAgo';
+import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
+import axios from 'axios';
+import { Bookmark, BookmarkCheck } from 'lucide-react';
+import Image from 'next/image';
+import Link from 'next/link';
+import { useMemo, useState } from 'react';
+import Article from './models/Articles';
+import { Trendings, Upcomings } from './models/TrendingsUpcomings';
+
+
 
 export default function Home() {
-  return (
-    <div className="grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20 font-[family-name:var(--font-geist-sans)]">
-      <main className="flex flex-col gap-8 row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="list-inside list-decimal text-sm text-center sm:text-left font-[family-name:var(--font-geist-mono)]">
-          <li className="mb-2">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] px-1 py-0.5 rounded font-semibold">
-              src/app/page.tsx
-            </code>
-            .
-          </li>
-          <li>Save and see your changes instantly.</li>
-        </ol>
+  const [searchMessage, setSearchMessage] = useState('');
+  const [searchQuery, setSearchQuery] = useState<string | null>(null);
+  // const [bookmarkedArticles, setBookmarkedArticles] = useState<Record<number,boolean>>({});
+  const { user, loading } = useAuth(); // Access user from the context
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+  // const toggleBookmark = (articleId:number) => {
+  //   setBookmarkedArticles(prevState => ({
+  //     ...prevState,
+  //     [articleId]: !prevState[articleId]
+  //   }));
+  //   console.log(bookmarkedArticles);
+  // };
+
+  const bookmarkArticle = async (articleId:number) =>{
+    await axios.post("http://localhost:5000/bookmark",{articleId},{withCredentials:true});
+    if (searchQuery)
+    {
+      refetchSearch();
+    }
+    else{
+      refetch();
+    }
+  }
+
+  const getTrendings = async () =>{
+    try {
+      const data = await axios.get("http://localhost:5000/trendings",{withCredentials:true});
+      return data.data;
+    }
+    catch(error){
+      console.log(error);
+    }
+  }
+
+  const getUpcomings = async () =>{
+    try {
+      const data = await axios.get("http://localhost:5000/upcomings",{withCredentials:true});
+      return data.data;
+    }
+    catch(error){
+      console.log(error);
+    }
+  }
+  
+  const { data: trendings } = useQuery<Trendings[]>({
+    queryKey: ['trendings'],
+    queryFn: getTrendings,
+  });
+
+  const { data: upcomings } = useQuery<Upcomings[]>({
+    queryKey: ['upcomings'],
+    queryFn: getUpcomings,
+  });
+
+  
+
+  // Fetch all articles
+  const fetchAllArticles = async ({ pageParam = 1 }: { pageParam?: number }): Promise<{data:Article[], total:number; hasMore:boolean; nextPage:number}> => {
+    const response = await fetch(`http://localhost:5000/data?page=${pageParam}`,{mode:'cors',credentials:"include"});
+    if (!response.ok && response.status != 401) {
+      throw new Error('Failed to fetch items');
+    }
+    if (response.status === 401)
+    {
+      window.location.href = "/login";
+    }
+    return response.json();
+  };
+
+  // Fetch search results
+  const fetchSearchResults = async (): Promise<Article[]> => {
+    const response = await fetch(
+      `http://localhost:5000/api/search?q=${encodeURIComponent(searchQuery || '')}`,{credentials:"include"}
+    );
+    if (!response.ok) {
+      throw new Error('Failed to fetch search results');
+    }
+    return response.json();
+  };
+
+  // React Query: Fetch all articles or search results
+  const { data: articles, refetch:refetchSearch } = useQuery<Article[]>({
+    queryKey: ['searchResults', searchQuery],
+    queryFn: fetchSearchResults,
+    enabled: Boolean(searchQuery?.trim()),
+  });
+
+   const {data:infiniteArticles, error, isError, isFetching, refetch, fetchNextPage, hasNextPage} = useInfiniteQuery<{data:Article[], total:number; hasMore:boolean; nextPage:number}>({
+    queryKey: ['infiniteArticles'],
+    queryFn: ({pageParam}) => fetchAllArticles({pageParam : pageParam as number}),
+    getNextPageParam: (lastPage, pages) => {
+        // Assuming your API returns an object with `hasMore` property
+        if (lastPage.hasMore) {
+          return pages.length + 1; // next page number
+        }
+        return undefined; // return undefined to signify the end
+      }, 
+      initialPageParam: 1,
+      refetchOnMount:true, // Start from page 1
+      refetchOnWindowFocus:false,
+      staleTime:0,
+    });
+
+  const handleSearch = () => {
+    setSearchQuery(searchMessage.trim()); // Set the search query
+  };
+
+  // Flatten all articles from all pages
+const allArticles = useMemo(() => {
+  if (!infiniteArticles?.pages) return [];
+  return infiniteArticles.pages.flatMap((page) => page.data); // Flatten articles from all pages
+}, [infiniteArticles?.pages]);
+
+  // State for the selected category
+  const [selectedCategory, setSelectedCategory] = useState<string>('All');
+  //  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
+
+// Extract unique categories dynamically
+  const categories = useMemo(() => {
+  if (searchQuery)
+  {
+    if (!articles) return [];
+    const uniqueCategories = new Set(articles.map((article) => article.category));
+  return ['All', ...Array.from(uniqueCategories)]; // Include 'All' for showing all articles
+  }
+  else{
+    if (!allArticles) return [];
+    const uniqueCategories = new Set(allArticles.map((article) => article.category));
+  return ['All', ...Array.from(uniqueCategories)]; // Include 'All' for showing all articles
+  }
+  
+  }, [searchQuery,articles,allArticles]);
+
+  // Filter articles based on the selected category
+  const filteredArticles = useMemo(() => {
+  if (searchQuery && selectedCategory != "All")
+  {
+    return articles?.filter((article) => article.category === selectedCategory);
+  }
+  if (!searchQuery && selectedCategory != "All"){
+    return allArticles?.filter((article) => article.category === selectedCategory);
+  }
+  if (searchQuery)
+  {
+    console.log (searchQuery)
+    return articles;
+  }
+  else{
+    return allArticles;
+  }
+  
+  }, [searchQuery,articles,allArticles, selectedCategory]);
+
+  // const sortedArticles = useMemo(() => {
+  //   if (!filteredArticles) return [];
+  //   return [...filteredArticles].sort((a, b) => {
+  //     const dateA = new Date(a.date);
+  //     const dateB = new Date(b.date);
+
+  //     if (sortOrder === 'desc') {
+  //       return dateA.getTime() - dateB.getTime(); // Ascending
+  //     } else {
+  //       return dateB.getTime() - dateA.getTime(); // Descending
+  //     }
+  //   });
+  // }, [filteredArticles, sortOrder]);
+
+  // const toggleSortOrder = () => {
+  //   setSortOrder((prevOrder) => (prevOrder === 'asc' ? 'desc' : 'asc'));
+  // };
+
+  //  const loaderRef = useRef<HTMLDivElement>(null);
+
+  //  useEffect(() => {
+  //    const loader = loaderRef.current;
+     
+  //    const observer = new IntersectionObserver((entries) => {
+  //      if (entries[0].isIntersecting && hasNextPage) {
+  //        fetchNextPage(); // Load next page when the loader element comes into view
+  //      }
+  //    }, { threshold: 0.9 });
+ 
+  //    if (loader) {
+  //      observer.observe(loader);
+  //    }
+ 
+  //    return () => {
+  //      if (loader) {
+  //        observer.unobserve(loader); // Cleanup observer
+  //      }
+  //    };
+  //  }, [hasNextPage, fetchNextPage]);
+
+  if (isError) {
+    return <div>Error: {error instanceof Error ? error.message : 'Unknown error'}</div>;
+  }
+
+  
+
+  if (loading) return <div>Loading...</div>;
+
+  return (
+    <div className="flex justify-center">
+      <ul className="xl:grid xl:grid-cols-3 w-[80%] mt-4 scrollbar-thin scrolla">
+      <SearchForm
+          searchMessage={searchMessage}
+          setSearchMessage={setSearchMessage}
+          onSearch={handleSearch}
+        />
+        <div className='flex gap-2 place-items-center mb-2 mt-2 col-span-2'>
+        <Label className='font-bold '>Select Category</Label>
+
+        <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button className='font-bold text-secondary-foreground' variant="default">{selectedCategory}</Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent className="w-56 max-h-64 overflow-y-auto scrollbar-thin scrollbar-thumb-zinc-700 scrollbar-track-transparent dark:scrollbar-thumb-zinc-600 dark:scrollbar-track-zinc-900">
+        <DropdownMenuLabel>Select Category</DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        {categories.map((category) => (
+          <DropdownMenuCheckboxItem
+          key={category}
+          checked={selectedCategory === category}
+          onCheckedChange={() => setSelectedCategory(category)}
           >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:min-w-44"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
+            {category}
+          </DropdownMenuCheckboxItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+
+    {/* <Button onClick={toggleSortOrder} className=" p-2 text-secondary-foreground">
+        Sort by Date: {sortOrder === 'asc' ? 'Ascending' : 'Descending'}
+      </Button> */}
+      </div>
+      {user && (
+        <div className='col-span-3'>
+          hello {user.name}
         </div>
-      </main>
-      <footer className="row-start-3 flex gap-6 flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
+      )}
+
+        <div className='col-span-2 flex flex-col'>
+
+        {isFetching && <div>Loading...</div>} {/* Subtle loading indicator */}
+        {filteredArticles?.map((article) => (
+          <li className="col-span-2 mb-4 min-h-40" key={article.id}>
+            <div className="md:flex  p-4 bg-card">
+              <div className="relative mr-2   md:min-w-[370px] ">
+                <Link href={article.link}>
+                  <Image
+                    src={article.image}
+                    alt={article.title}
+                    width={370}
+                    height={210}
+                    className="object-cover transition ease-in-out hover:opacity-85 w-full h-full"
+                  />
+                </Link>
+                <div className="flex flex-col py-4 px-1 text-wrap justify-center h-8 font-bold text-sm border-2 border-secondary-foreground absolute bottom-2 left-2 text-white bg-black bg-opacity-60 rounded-md">
+                <p className='justify-self-center text-xs md:text-sm'>{article.category}</p>
+                </div>
+              </div>
+
+              <div className='flex flex-col text-wrap w-[100%]'>
+                <Link className="hover:underline" href={article.link}>
+                  <h3 className="font-khand text-secondary-foreground text-lg md:text-xl lg:text-3xl leading-6">{article.title}</h3>
+                </Link>
+                <p className="text-secondary-foreground leading-5">{article.description}</p>
+                <div className='flex flex-row gap-2 mt-auto'>
+                By<p className='font-extrabold'>{article.author}</p> <p>{timeAgo(article.date)}</p>
+                {article.isBookmarked ? (
+                  <BookmarkCheck onClick={()=>bookmarkArticle(article.id)} className='ml-auto hover:text-primary'></BookmarkCheck>
+                ):
+                (
+                  <Bookmark onClick={()=>bookmarkArticle(article.id)} className='ml-auto hover:text-primary'></Bookmark>
+                )
+                }
+                  
+                
+                </div>
+               
+              </div>
+            </div>
+          </li>
+        ))}
+        {/* Intersection Observer trigger element */}
+        <Button onClick={()=>{
+          if (hasNextPage)
+          {
+            fetchNextPage();
+          }
+        }} className='text-secondary-foreground text-3xl font-khand place-self-center w-full h-10'>SHOW MORE</Button>
+        <div
+          className="h-10 flex justify-center items-center"
         >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
+          {isFetching ? <div>Loading more...</div> : null}
+          </div>
+
+ 
+      </div>
+      <div className='sticky h-max top-16 flex flex-col col-span-1 ml-8 overflow-hidden text-nowrap whitespace-nowrap'>
+        <p className='text-3xl font-extrabold mb-1'>Trending</p>
+        {trendings?.map((trending,index)=>
+        <div className='mb-1 flex text-lg font-roboto font-bold ' key={trending.id}>
+        <div className='px-2 border-2 mr-1 border-primary w-8 place-items-center'>
+          <p>{index+1}</p>
+        </div>
+        <Link href={trending.link}>
+        <p className='max-w-[2rem] hover:underline'>{trending.title}</p>
+        </Link>
+      </div>
+        )}
+
+      <p className='text-3xl font-extrabold mb-1 mt-4'>Upcoming Movies</p>
+        {upcomings?.map((upcoming,index)=>
+        <div className='mb-1 flex text-lg font-roboto font-bold ' key={upcoming.id}>
+          <div className='px-2 border-2 mr-1 border-primary w-8 place-items-center'>
+            <p>{index+1}</p>
+          </div>
+          <Link href={upcoming.link}>
+          <p className='max-w-[2rem] hover:underline'>{upcoming.title}</p>
+          </Link>
+        </div>
+        )}
+      </div>
+
+      
+      </ul>
+      
     </div>
   );
 }
