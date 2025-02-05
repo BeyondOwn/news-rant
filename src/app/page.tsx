@@ -5,12 +5,13 @@ import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMe
 import { Label } from '@/components/ui/label';
 import { useAuth } from '@/context/context';
 import timeAgo from '@/utilities/timeAgo';
-import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import axios from 'axios';
 import { Bookmark, BookmarkCheck } from 'lucide-react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { useMemo, useState } from 'react';
+import { Bounce, toast } from "react-toastify";
 import Article from './models/Articles';
 import { Trendings, Upcomings } from './models/TrendingsUpcomings';
 
@@ -21,6 +22,7 @@ export default function Home() {
   const [searchQuery, setSearchQuery] = useState<string | null>(null);
   // const [bookmarkedArticles, setBookmarkedArticles] = useState<Record<number,boolean>>({});
   const { user, loading } = useAuth(); // Access user from the context
+  const queryClient = useQueryClient();
 
   // const toggleBookmark = (articleId:number) => {
   //   setBookmarkedArticles(prevState => ({
@@ -30,16 +32,78 @@ export default function Home() {
   //   console.log(bookmarkedArticles);
   // };
 
-  const bookmarkArticle = async (articleId:number) =>{
-    await axios.post("http://localhost:5000/bookmark",{articleId},{withCredentials:true});
-    if (searchQuery)
-    {
-      refetchSearch();
-    }
-    else{
-      refetch();
-    }
-  }
+  // Define the mutation
+  const bookmarkMutation = useMutation({
+    mutationFn: async (articleId: number) => {
+      const response = await axios.post("http://localhost:5000/bookmark", 
+        { articleId }, 
+        { withCredentials: true }
+      );
+      return {
+        data: response.data,
+        status: response.status
+      };
+    },
+    onMutate: async (articleId) => {
+      await queryClient.cancelQueries({ queryKey: ['infiniteArticles'] });
+      await queryClient.cancelQueries({ queryKey: ['searchResults'] });
+
+      // Get the current state
+      const previousArticles = queryClient.getQueryData(['infiniteArticles']);
+
+      // Optimistically update the articles
+      queryClient.setQueryData(['infiniteArticles'], (old: any) => {
+        if (!old?.pages) return old;
+        
+        return {
+          pages: old.pages.map((page: any) => ({
+            ...page,
+            data: page.data.map((article: Article) =>
+              article.id === articleId
+                ? { ...article, isBookmarked: !article.isBookmarked }
+                : article
+            ),
+          })),
+          pageParams: old.pageParams,
+        };
+      });
+
+      return { previousArticles };
+    },
+    onSuccess: (response, articleId) => {
+      // Determine action based on status code
+      const isBookmarked = response.status === 201;
+      const action = isBookmarked ? 'bookmarked' : 'unbookmarked';
+      
+      (action === 'bookmarked' ? toast.success : toast.info)(`Article ${action}!`);
+    },
+    onError: (error, articleId, context) => {
+      // Rollback to the previous state
+      queryClient.setQueryData(['infiniteArticles'], context?.previousArticles);
+      
+      toast.info(`${error.message}`, {
+        position: "bottom-right",
+        autoClose: 5000,
+        hideProgressBar: false,
+        closeOnClick: false,
+        pauseOnHover: true,
+        draggable: true,
+        progress: undefined,
+        theme: "dark",
+        transition: Bounce,
+        });
+    },
+    onSettled: () => {
+      // Refetch to ensure server-client state consistency
+      queryClient.invalidateQueries({ queryKey: ['infiniteArticles'] });
+      queryClient.invalidateQueries({ queryKey: ['searchResults'] });
+    },
+  });
+
+  // Replace the bookmarkArticle function with this
+  const bookmarkArticle = (articleId: number) => {
+    bookmarkMutation.mutate(articleId);
+  };
 
   const getTrendings = async () =>{
     try {
@@ -104,21 +168,18 @@ export default function Home() {
     enabled: Boolean(searchQuery?.trim()),
   });
 
-   const {data:infiniteArticles, error, isError, isFetching, refetch, fetchNextPage, hasNextPage} = useInfiniteQuery<{data:Article[], total:number; hasMore:boolean; nextPage:number}>({
+   const {data:infiniteArticles, error, isError, isFetching, refetch, fetchNextPage, hasNextPage} = useInfiniteQuery({
     queryKey: ['infiniteArticles'],
     queryFn: ({pageParam}) => fetchAllArticles({pageParam : pageParam as number}),
-    getNextPageParam: (lastPage, pages) => {
-        // Assuming your API returns an object with `hasMore` property
-        if (lastPage.hasMore) {
-          return pages.length + 1; // next page number
-        }
-        return undefined; // return undefined to signify the end
-      }, 
-      initialPageParam: 1,
-      refetchOnMount:true, // Start from page 1
-      refetchOnWindowFocus:false,
-      staleTime:0,
-    });
+    getNextPageParam: (lastPage) => {
+        // Return the next page number if there are more pages, otherwise return undefined
+        return lastPage.hasMore ? lastPage.nextPage : undefined;
+    },
+    initialPageParam: 1,
+    refetchOnMount: true,
+    refetchOnWindowFocus: false,
+    staleTime: 0,
+});
 
   const handleSearch = () => {
     setSearchQuery(searchMessage.trim()); // Set the search query
@@ -127,7 +188,7 @@ export default function Home() {
   // Flatten all articles from all pages
 const allArticles = useMemo(() => {
   if (!infiniteArticles?.pages) return [];
-  return infiniteArticles.pages.flatMap((page) => page.data); // Flatten articles from all pages
+  return infiniteArticles.pages.flatMap((page) => page.data);
 }, [infiniteArticles?.pages]);
 
   // State for the selected category
@@ -287,12 +348,16 @@ const allArticles = useMemo(() => {
                 <div className='flex flex-row gap-2 mt-auto'>
                 By<p className='font-extrabold'>{article.author}</p> <p>{timeAgo(article.date)}</p>
                 {article.isBookmarked ? (
-                  <BookmarkCheck onClick={()=>bookmarkArticle(article.id)} className='ml-auto hover:text-primary'></BookmarkCheck>
-                ):
-                (
-                  <Bookmark onClick={()=>bookmarkArticle(article.id)} className='ml-auto hover:text-primary'></Bookmark>
-                )
-                }
+                  <BookmarkCheck 
+                    onClick={() => bookmarkArticle(article.id)} 
+                    className={`ml-auto hover:text-primary ${bookmarkMutation.isPending ? 'opacity-50' : ''}`}
+                  />
+                ) : (
+                  <Bookmark 
+                    onClick={() => bookmarkArticle(article.id)} 
+                    className={`ml-auto hover:text-primary ${bookmarkMutation.isPending ? 'opacity-50' : ''}`}
+                  />
+                )}
                   
                 
                 </div>

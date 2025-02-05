@@ -71,7 +71,7 @@ const Navbar: FC<NavbarProps> = ({}) => {
       if (!user){
 
       }
-      console.log(user?.picture);
+      // console.log(user?.picture);
 
   return <div className="z-10 grid grid-cols-3 items-center sticky w-full top-0 left-0 bg-gradient-to-r  px-4 py-2  border-b-2 bg-background">
     <MenuIcon size={32} className='hover:cursor-pointer' onClick={()=>{window.location.href="/"}}></MenuIcon>

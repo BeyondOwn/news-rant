@@ -6,6 +6,7 @@ import axios from 'axios';
 import { Bookmark, BookmarkCheck } from 'lucide-react';
 import Image from 'next/image';
 import Link from 'next/link';
+import { toast } from 'react-toastify';
 import Article from '../models/Articles';
 
 // eslint-disable-next-line @typescript-eslint/no-empty-object-type
@@ -15,6 +16,7 @@ const Page = ({}) => {
     
     const bookmarkArticle = async (articleId:number) =>{
         await axios.post("http://localhost:5000/bookmark",{articleId},{withCredentials:true});
+        toast.info('Article unbookmarked!')
           refetch();
       }
 
