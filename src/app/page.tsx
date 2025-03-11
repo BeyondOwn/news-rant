@@ -372,7 +372,7 @@ useEffect(() => {
           <li className="col-span-2 mb-4 min-h-40" key={article.id}>
             <div className="md:flex  p-4 bg-card">
               <div className="relative mr-2   md:min-w-[370px] ">
-                <Link href={article.link}>
+                <Link href={`/${article.id}`}>
                   <Image
                     src={article.image}
                     alt={article.title}
