@@ -2,16 +2,16 @@
 import { SearchForm } from '@/components/InputForm';
 import { Button } from '@/components/ui/button';
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
-import { Label } from '@/components/ui/label';
 import { useAuth } from '@/context/context';
-import timeAgo from '@/utilities/timeAgo';
+import api from '@/lib/axios';
+import timeAgo from '@/lib/timeAgo';
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import axios from 'axios';
+import debounce from 'lodash/debounce';
 import { Bookmark, BookmarkCheck } from 'lucide-react';
 import Image from 'next/image';
 import Link from 'next/link';
-import { useMemo, useState } from 'react';
-import { Bounce, toast } from "react-toastify";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { toast } from "react-toastify";
 import Article from './models/Articles';
 import { Trendings, Upcomings } from './models/TrendingsUpcomings';
 
@@ -35,14 +35,16 @@ export default function Home() {
   // Define the mutation
   const bookmarkMutation = useMutation({
     mutationFn: async (articleId: number) => {
-      const response = await axios.post("http://localhost:5000/bookmark", 
-        { articleId }, 
-        { withCredentials: true }
-      );
-      return {
-        data: response.data,
-        status: response.status
-      };
+      try {
+        const response = await api.post("/bookmark", { articleId });
+        return {
+          data: response.data,
+          status: response.status
+        };
+      } catch (error: any) {
+        // Let the error be handled by the axios interceptor
+        throw error;
+      }
     },
     onMutate: async (articleId) => {
       await queryClient.cancelQueries({ queryKey: ['infiniteArticles'] });
@@ -70,28 +72,11 @@ export default function Home() {
 
       return { previousArticles };
     },
-    onSuccess: (response, articleId) => {
-      // Determine action based on status code
-      const isBookmarked = response.status === 201;
-      const action = isBookmarked ? 'bookmarked' : 'unbookmarked';
-      
-      (action === 'bookmarked' ? toast.success : toast.info)(`Article ${action}!`);
-    },
-    onError: (error, articleId, context) => {
+    onError: (error: any, articleId, context) => {
       // Rollback to the previous state
       queryClient.setQueryData(['infiniteArticles'], context?.previousArticles);
       
-      toast.info(`${error.message}`, {
-        position: "bottom-right",
-        autoClose: 5000,
-        hideProgressBar: false,
-        closeOnClick: false,
-        pauseOnHover: true,
-        draggable: true,
-        progress: undefined,
-        theme: "dark",
-        transition: Bounce,
-        });
+      // Error toast is now handled by axios interceptor
     },
     onSettled: () => {
       // Refetch to ensure server-client state consistency
@@ -101,13 +86,37 @@ export default function Home() {
   });
 
   // Replace the bookmarkArticle function with this
-  const bookmarkArticle = (articleId: number) => {
-    bookmarkMutation.mutate(articleId);
+  const bookmarkArticle = async (articleId: number) => {
+    try{
+      const response = await api.post("/bookmark", { articleId });
+     if (response.status === 201)
+     {
+      toast.success('Article bookmarked!')
+     }
+      else if  (response.status === 200)
+     {
+      toast.info('Article unbookmarked!')
+     }
+    
+    
+    if (searchQuery)
+    {
+      refetchSearch();
+    }
+    else{
+      refetch();
+    }
+    }
+    catch(error){
+      toast.error(error instanceof Error ? error.message : 'An unknown error occurred');
+      console.log(error);
+    }
+     
   };
 
   const getTrendings = async () =>{
     try {
-      const data = await axios.get("http://localhost:5000/trendings",{withCredentials:true});
+      const data = await api.get("/trendings");
       return data.data;
     }
     catch(error){
@@ -117,7 +126,7 @@ export default function Home() {
 
   const getUpcomings = async () =>{
     try {
-      const data = await axios.get("http://localhost:5000/upcomings",{withCredentials:true});
+      const data = await api.get("/upcomings");
       return data.data;
     }
     catch(error){
@@ -139,26 +148,21 @@ export default function Home() {
 
   // Fetch all articles
   const fetchAllArticles = async ({ pageParam = 1 }: { pageParam?: number }): Promise<{data:Article[], total:number; hasMore:boolean; nextPage:number}> => {
-    const response = await fetch(`http://localhost:5000/data?page=${pageParam}`,{mode:'cors',credentials:"include"});
-    if (!response.ok && response.status != 401) {
-      throw new Error('Failed to fetch items');
+    try {
+        const response = await api.get(`/data?page=${pageParam}`);
+        return response.data;
+    } catch (error: any) {
+        if (error.response?.status === 401) {
+            window.location.href = "/login";
+        }
+        throw error;
     }
-    if (response.status === 401)
-    {
-      window.location.href = "/login";
-    }
-    return response.json();
   };
 
   // Fetch search results
   const fetchSearchResults = async (): Promise<Article[]> => {
-    const response = await fetch(
-      `http://localhost:5000/api/search?q=${encodeURIComponent(searchQuery || '')}`,{credentials:"include"}
-    );
-    if (!response.ok) {
-      throw new Error('Failed to fetch search results');
-    }
-    return response.json();
+    const response = await api.get(`/api/search?q=${encodeURIComponent(searchQuery || '')}`);
+    return response.data;
   };
 
   // React Query: Fetch all articles or search results
@@ -181,8 +185,17 @@ export default function Home() {
     staleTime: 0,
 });
 
-  const handleSearch = () => {
-    setSearchQuery(searchMessage.trim()); // Set the search query
+  // Replace setSearchQuery with a debounced version
+  const debouncedSetSearchQuery = useCallback(
+    debounce((value: string) => {
+      setSearchQuery(value);
+    }, 300),
+    [] // Empty dependency array since we don't want to recreate the debounced function
+  );
+
+  // Update the handleSearch function
+  const handleSearch = (value: string) => {
+    debouncedSetSearchQuery(value);
   };
 
   // Flatten all articles from all pages
@@ -230,6 +243,35 @@ const allArticles = useMemo(() => {
   }
   
   }, [searchQuery,articles,allArticles, selectedCategory]);
+
+  const itemRefs = useRef({});
+  const [isOpen, setIsOpen] = useState(false);
+
+ // Initialize refs
+useEffect(() => {
+  const newRefs = {};
+  categories.forEach((category) => {
+    // Preserve existing refs if they exist
+    newRefs[category] = itemRefs.current[category] || React.createRef();
+  });
+  itemRefs.current = newRefs;
+}, [categories]);
+
+ useEffect(() => {
+  if (isOpen && selectedCategory) {
+    // Add a small delay to ensure the dropdown is fully rendered
+    setTimeout(() => {
+      const ref = itemRefs.current[selectedCategory]?.current;
+      if (ref) {
+        // console.log('Scrolling to:', selectedCategory, ref);
+        ref.scrollIntoView({
+          behavior: "instant",
+          block: "nearest",
+        });
+      }
+    }, 50);
+  }
+}, [isOpen, selectedCategory]);
 
   // const sortedArticles = useMemo(() => {
   //   if (!filteredArticles) return [];
@@ -284,40 +326,44 @@ const allArticles = useMemo(() => {
       <ul className="xl:grid xl:grid-cols-3 w-[80%] mt-4 scrollbar-thin scrolla">
       <SearchForm
           searchMessage={searchMessage}
-          setSearchMessage={setSearchMessage}
-          onSearch={handleSearch}
+          setSearchMessage={(value) => {
+            setSearchMessage(value);
+            handleSearch(value); // Call handleSearch whenever the input changes
+          }}
+          onSearch={() => {}} // We can leave this empty since we're searching on type
         />
         <div className='flex gap-2 place-items-center mb-2 mt-2 col-span-2'>
-        <Label className='font-bold '>Select Category</Label>
 
-        <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button className='font-bold text-secondary-foreground' variant="default">{selectedCategory}</Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent className="w-56 max-h-64 overflow-y-auto scrollbar-thin scrollbar-thumb-zinc-700 scrollbar-track-transparent dark:scrollbar-thumb-zinc-600 dark:scrollbar-track-zinc-900">
-        <DropdownMenuLabel>Select Category</DropdownMenuLabel>
-        <DropdownMenuSeparator />
-        {categories.map((category) => (
-          <DropdownMenuCheckboxItem
-          key={category}
-          checked={selectedCategory === category}
-          onCheckedChange={() => setSelectedCategory(category)}
-          >
-            {category}
-          </DropdownMenuCheckboxItem>
-        ))}
-      </DropdownMenuContent>
-    </DropdownMenu>
 
-    {/* <Button onClick={toggleSortOrder} className=" p-2 text-secondary-foreground">
-        Sort by Date: {sortOrder === 'asc' ? 'Ascending' : 'Descending'}
-      </Button> */}
-      </div>
-      {user && (
-        <div className='col-span-3'>
-          hello {user.name}
+            <DropdownMenu onOpenChange={(open)=>{
+              setIsOpen(open);
+            }}>
+                <DropdownMenuTrigger asChild>
+            <Button className='font-bold font-roboto text-secondary-foreground md:text-lg ' variant="default">
+                        {selectedCategory == "All" ? "Select Category" : selectedCategory}
+                    </Button>
+            
+                    
+                </DropdownMenuTrigger>
+                <DropdownMenuContent 
+                
+                className="w-56 max-h-64 overflow-y-auto scrollbar-thin scrollbar-thumb-zinc-700 scrollbar-track-transparent dark:scrollbar-thumb-zinc-600 dark:scrollbar-track-zinc-900">
+                    <DropdownMenuLabel className=''>Select Category</DropdownMenuLabel>
+                    <DropdownMenuSeparator />
+                    {categories.map((category) => (
+                        <DropdownMenuCheckboxItem
+                        ref={itemRefs.current[category]}
+                        key={category}
+                        checked={selectedCategory === category}
+                        onCheckedChange={() => setSelectedCategory(category)}
+                        >
+                            {category}
+                        </DropdownMenuCheckboxItem>
+                    ))}
+                </DropdownMenuContent>
+            </DropdownMenu>
         </div>
-      )}
+     
 
         <div className='col-span-2 flex flex-col'>
 
@@ -341,7 +387,7 @@ const allArticles = useMemo(() => {
               </div>
 
               <div className='flex flex-col text-wrap w-[100%]'>
-                <Link className="hover:underline" href={article.link}>
+                <Link className="hover:underline" href={`/${article.id}`}>
                   <h3 className="font-khand text-secondary-foreground text-lg md:text-xl lg:text-3xl leading-6">{article.title}</h3>
                 </Link>
                 <p className="text-secondary-foreground leading-5">{article.description}</p>

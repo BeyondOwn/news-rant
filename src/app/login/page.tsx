@@ -1,8 +1,9 @@
 'use client'
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useAuth } from "@/context/context";
 import Image from "next/image";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 declare global {
     interface Window {
@@ -19,31 +20,86 @@ declare global {
 }
 
 export default function Login() {
+    const { setAuthData } = useAuth();
     const [isLoading, setIsLoading] = useState(false);
+    const [isInitialized, setIsInitialized] = useState(false);
+    const [oneTapError, setOneTapError] = useState(false);
+    const [isPrompting, setIsPrompting] = useState(false);
+    const hasCheckedParams = useRef(false);
 
     useEffect(() => {
-        try {
-            // Initialize Google Identity Services
-            window.google?.accounts.id.initialize({
-                client_id: process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID!,
-                callback: (response) => {
-                    // Redirect to your backend auth endpoint
-                    window.location.href = "http://localhost:5000/auth/google";
-                },
-                ux_mode: 'popup',
-            });
+        if (isInitialized || isPrompting) return;
+        
+        const initializeGoogleOneTap = async () => {
+            try {
+                const clientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
+                if (!clientId) {
+                    console.error('Google Client ID is not configured');
+                    setOneTapError(true);
+                    return;
+                }
 
-            // Trigger the prompt
-            window.google?.accounts.id.prompt();
+                setIsPrompting(true);
+                window.google?.accounts.id.initialize({
+                    client_id: clientId,
+                    callback: async (response) => {
+                        try {
+                            setIsLoading(true);
+                            window.location.href = `https://scraping-api-w0za.onrender.com/auth/google?credential=${response.credential}`;
+                        } catch (error) {
+                            console.error('Authentication error:', error);
+                            setOneTapError(true);
+                        } finally {
+                            setIsLoading(false);
+                        }
+                    },
+                    ux_mode: 'popup',
+                    auto_select: false,
+                    cancel_on_tap_outside: true
+                });
 
-        } catch (error) {
-            console.error('Error initializing Google One Tap:', error);
-        }
-    }, []);
+                await new Promise(resolve => setTimeout(resolve, 1000));
 
-    const GoogleAuth = async () => {
-        window.location.href = "http://localhost:5000/auth/google";
+                window.google?.accounts.id.prompt();
+
+            } catch (error) {
+                console.error('Error initializing Google One Tap:', error);
+                setOneTapError(true);
+            } finally {
+                setIsInitialized(true);
+                setIsPrompting(false);
+            }
+        };
+
+        initializeGoogleOneTap();
+    }, [isInitialized, isPrompting]);
+
+    const GoogleAuth = () => {
+        window.location.href = `https://scraping-api-w0za.onrender.com/auth/google`;
     }
+
+    // Second useEffect for handling redirect
+    useEffect(() => {
+        if (hasCheckedParams.current) return;
+        hasCheckedParams.current = true;
+
+        const params = new URLSearchParams(window.location.search);
+        const token = params.get('token');
+        const userData = params.get('userData');
+        
+        if (token && userData) {
+            try {
+                const user = JSON.parse(decodeURIComponent(userData));
+                if (user && token) {
+                    setAuthData(token, user);
+                    window.history.replaceState({}, document.title, window.location.pathname);
+                    window.location.href = '/';
+                }
+            } catch (error) {
+                console.error('Error parsing user data:', error);
+            }
+        }
+    }, [setAuthData]);
 
     return (
         <div className="flex w-full min-h-screen items-center justify-center bg-background p-4">
@@ -58,10 +114,18 @@ export default function Login() {
                     onClick={GoogleAuth} 
                     variant="outline" 
                     className="w-full mb-4 flex items-center gap-3 h-12 hover:text-secondary-foreground"
+                    disabled={isLoading}
                 >
                     <Image width={20} height={20} alt="google" src="google.svg"/>
                     <span>Continue with Google</span>
                 </Button>
+
+                {/* Show message if One Tap fails */}
+                {oneTapError && (
+                    <p className="text-sm text-muted-foreground text-center mb-4">
+                        One-tap sign in not available. Please use the button above.
+                    </p>
+                )}
 
                 <div className="relative my-6">
                     <div className="absolute inset-0 flex items-center">

@@ -1,8 +1,8 @@
 'use client'
 import { useAuth } from '@/context/context';
-import timeAgo from '@/utilities/timeAgo';
+import api from '@/lib/axios';
+import timeAgo from '@/lib/timeAgo';
 import { useQuery } from '@tanstack/react-query';
-import axios from 'axios';
 import { Bookmark, BookmarkCheck } from 'lucide-react';
 import Image from 'next/image';
 import Link from 'next/link';
@@ -15,7 +15,7 @@ const Page = ({}) => {
     const {user} = useAuth();
     
     const bookmarkArticle = async (articleId:number) =>{
-        await axios.post("http://localhost:5000/bookmark",{articleId},{withCredentials:true});
+        await api.post("/bookmark",{articleId},{withCredentials:true});
         toast.info('Article unbookmarked!')
           refetch();
       }
@@ -28,7 +28,7 @@ const Page = ({}) => {
         }
       
         try {
-          const response = await axios.get('http://localhost:5000/bookmarked', {
+          const response = await api.get('/bookmarked', {
             withCredentials: true,
           });
       

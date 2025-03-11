@@ -1,6 +1,5 @@
 'use client'
 import { useAuth } from '@/context/context';
-import axios from "axios";
 import {
   CircleUserRound,
   LogIn,
@@ -22,7 +21,7 @@ type NavbarProps = object
 
 const Navbar: FC<NavbarProps> = ({}) => {
   const router = useRouter();
-  const {user} = useAuth();
+  const {user,logout} = useAuth();
   //drop menu
   const [isOpen, setIsOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -47,26 +46,6 @@ const Navbar: FC<NavbarProps> = ({}) => {
 
      // Close the menu when an item is clicked
     
-
-    const logout = async () => {
-        try {
-          const response = await axios.get("http://localhost:5000/logout", {
-            withCredentials: true, // Ensure cookies are included in the request
-          });
-      
-          if (response.status === 200) {
-            // Logout was successful
-            console.log("Logged out successfully.");
-            // Optional: Redirect user or update UI
-            window.location.href = "/login"; // Example redirect
-          } else {
-            console.error("Failed to log out:", response.data);
-          }
-        } catch (error) {
-          console.error("An error occurred during logout:", error);
-          // Optional: Display an error message to the user
-        }
-      };
 
       if (!user){
 

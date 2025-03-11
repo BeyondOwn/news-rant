@@ -8,5 +8,7 @@ export default interface Article {
   author: string;
   date: string;
   isBookmarked:boolean;
+  content:string[];
+  imgs:string[];
   createdAt: string;
 }
