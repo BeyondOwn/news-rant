@@ -3,7 +3,6 @@ import { toast } from 'react-toastify';
 
 const api = axios.create({
   baseURL: 'https://scraping-api-w0za.onrender.com',
-  withCredentials: true,
   timeout: 5000, // 5 second timeout
 });
 
