@@ -25,21 +25,31 @@ api.interceptors.response.use(
     const originalRequest = error.config;
 
     // If the error is a network error
-    if (error.code === 'ERR_NETWORK') {
-      toast.error('Unable to connect to server. Please check your connection.');
-      
-      // Retry the request up to 3 times
-      if (!originalRequest._retry) {
-        originalRequest._retry = 1;
-      } else if (originalRequest._retry < 3) {
-        originalRequest._retry++;
-      } else {
-        return Promise.reject(error);
+     // Check if it's a network error (could be connection issues or server sleeping)
+     if (error.code === 'ERR_NETWORK') {
+      // If we already retried 3 times, don't retry further and reject
+      if (originalRequest._retry && originalRequest._retry >= 3) {
+        // Show the toast only once when it fails after retrying
+        toast.error('Unable to connect to server. Please check your connection.');
+        return Promise.reject(error); // Reject the request after 3 retries
       }
 
-      // Wait for 1 second before retrying
+      // If this is the first retry attempt, mark it
+      if (!originalRequest._retry) {
+        originalRequest._retry = 1;
+      } else {
+        originalRequest._retry++;
+      }
+
+      // Show the error toast on the first failed attempt only
+      if (originalRequest._retry === 1) {
+        toast.error('Unable to connect to server. Retrying...');
+      }
+
+      // Wait for 1 second before retrying (can increase the delay between retries)
       await new Promise(resolve => setTimeout(resolve, 1000));
-      
+
+      // Retry the original request
       return api(originalRequest);
     }
 
