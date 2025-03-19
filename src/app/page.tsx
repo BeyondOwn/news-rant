@@ -369,24 +369,25 @@ useEffect(() => {
 
         {isFetching && <div>Loading...</div>} {/* Subtle loading indicator */}
         {filteredArticles?.map((article) => (
-          <li className="col-span-2 mb-4 min-h-40" key={article.id}>
-            <div className="md:flex  p-4 bg-card">
-              <div className="relative mr-2   md:min-w-[370px] ">
+          <li className="col-span-2 mb-4" key={article.id}>
+            <div className="flex flex-col md:flex-row bg-card p-4 gap-4">
+            <div className="relative w-full md:w-[350px] h-[200px] flex-shrink-0">
                 <Link href={`/${article.id}`}>
                   <Image
                     src={article.image}
                     alt={article.title}
-                    width={370}
-                    height={210}
-                    className="object-cover transition ease-in-out hover:opacity-85 w-full h-full"
+                    fill
+                    sizes="(max-width: 768px) 100vw, 350px"
+                    className="object-cover transition ease-in-out hover:opacity-85 rounded-md"
+                    priority
                   />
                 </Link>
-                <div className="flex flex-col py-4 px-1 text-wrap justify-center h-8 font-bold text-sm border-2 border-secondary-foreground absolute bottom-2 left-2 text-white bg-black bg-opacity-60 rounded-md">
-                <p className='justify-self-center text-xs md:text-sm'>{article.category}</p>
+                <div className="absolute bottom-2 left-2 px-2 py-1 bg-black bg-opacity-60 rounded-md border-2 border-secondary-foreground">
+                  <p className='text-xs md:text-sm text-white font-bold'>{article.category}</p>
                 </div>
               </div>
 
-              <div className='flex flex-col text-wrap w-[100%]'>
+              <div className='flex flex-col flex-grow min-w-0'>
                 <Link className="hover:underline" href={`/${article.id}`}>
                   <h3 className="font-khand text-secondary-foreground text-lg md:text-xl lg:text-3xl leading-6">{article.title}</h3>
                 </Link>
